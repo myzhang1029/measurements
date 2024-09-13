@@ -5,6 +5,7 @@ Written for the Physics 2CL course at UC San Diego."""
 import math
 import warnings
 
+
 class Uncertainty:
     """An uncertainty that gives correct string printout.
 
@@ -192,7 +193,6 @@ class Uncertainty:
         return self._comparison_method(other, "ge")
 
 
-
 class Measurement:
     """Represents a quantity with uncertainty.
 
@@ -202,7 +202,7 @@ class Measurement:
 
     Examples
     --------
-    The uncertainties are propagated assuming independence:
+    Uncertainties are propagated assuming independence:
 
     >>> Measurement(10.12, 1.999) + Measurement(20, 3.1)
     Measurement(30, 4)
@@ -213,7 +213,19 @@ class Measurement:
     >>> arr = np.array([1.623, 2.123, 2.623])
     >>> str(Measurement(np.mean(arr), np.std(arr)))
     '2.1 ± 0.4'
+
+    Basic arithmetic operations work (also assuming independence):
+
+    >>> Measurement(10.12, 1.999) * Measurement(20, 1.1)
+    Measurement(200, 40)
+    >>> 10 * Measurement(20, 1.1)
+    Measurement(200, 11)
+    >>> Measurement(10.12, 1.999) / Measurement(20, 1.1)
+    Measurement(0.51, 0.10)
+    >>> 1 / Measurement(10, 1)
+    Measurement(0.100, 0.010)
     """
+
     def __init__(self, center, uncert):
         self._center = center
         if isinstance(uncert, Uncertainty):
@@ -229,7 +241,8 @@ class Measurement:
         if npow >= 0:
             centerstr = f"{center:.{npow}f}"
         else:
-            centerstr = str(center)
+            # npow negative => keep only int part
+            centerstr = str(int(center))
         return centerstr, uncertstr
 
     def __str__(self):
@@ -238,10 +251,14 @@ class Measurement:
     def __repr__(self):
         return "Measurement({0}, {1})".format(*self._shared_stringify())
 
+    @staticmethod
+    def _check_other_is_us(other):
+        if not isinstance(other, Measurement):
+            raise TypeError("Use normal Python operators instead")
+
     def add_with_correlation(self, other, r=0.0):
         """Add two `Measurement`s with the given correlation coefficient."""
-        if not isinstance(other, Measurement):
-            raise TypeError("Use the addition operator instead")
+        self._check_other_is_us(other)
         new_uncert = self._uncert.add_uncert(other._uncert, r=r)
         return Measurement(self._center + other._center, new_uncert)
 
@@ -251,10 +268,15 @@ class Measurement:
         # Assume `other` is a pure number
         return Measurement(self._center + other, self._uncert)
 
+    def __radd__(self, other):
+        # if isinstance(other, Measurement):
+        #     unreachable: Python should call other's __add__
+        # Assume `other` is a pure number
+        return Measurement(other + self._center, self._uncert)
+
     def sub_with_correlation(self, other, r=0.0):
         """Subtract two `Measurement`s with the given correlation coefficient."""
-        if not isinstance(other, Measurement):
-            raise TypeError("Use the addition operator instead")
+        self._check_other_is_us(other)
         new_uncert = self._uncert.add_uncert(other._uncert, r=r)
         return Measurement(self._center - other._center, new_uncert)
 
@@ -263,6 +285,67 @@ class Measurement:
             return self.sub_with_correlation(other)
         # Assume `other` is a pure number
         return Measurement(self._center - other, self._uncert)
+
+    def __rsub__(self, other):
+        # if isinstance(other, Measurement):
+        #     unreachable: Python should call other's __sub__
+        # Assume `other` is a pure number
+        return Measurement(other - self._center, self._uncert)
+
+    def mul_with_correlation(self, other, r=0.0):
+        """Multiply two `Measurement`s with the given correlation coefficient."""
+        self._check_other_is_us(other)
+        # u(f)**2 = (partial(f,a)u(a))**2+(partial(f,b)u(b))**2+corrterm
+        # u(f)**2 = (u(a)b)**2 + (u(b)a)**2+corrterm
+        # (u(f)/f)**2 = (u(a)/a)**2 + (u(b)/b)**2+corrterm/(ab)**2
+        new_reluncert = (
+            self._uncert/self._center).add_uncert(other._uncert/other._center, r=r)
+        new_center = self._center * other._center
+        return Measurement(new_center, new_reluncert * new_center)
+
+    def __mul__(self, other):
+        if isinstance(other, Measurement):
+            return self.mul_with_correlation(other)
+        # Assume `other` is a pure number
+        return Measurement(self._center * other, self._uncert * other)
+
+    def __rmul__(self, other):
+        # if isinstance(other, Measurement):
+        #     unreachable: Python should call other's __mul__
+        # Assume `other` is a pure number
+        return Measurement(other * self._center, other * self._uncert)
+
+    def truediv_with_correlation(self, other, r=0.0):
+        """Multiply two `Measurement`s with the given correlation coefficient."""
+        self._check_other_is_us(other)
+        new_center = self._center / other._center
+        new_reluncert = (self._uncert/self._center).add_uncert(
+            other._uncert / other._center, r=r)
+        return Measurement(new_center, new_reluncert * new_center)
+
+    def __truediv__(self, other):
+        if isinstance(other, Measurement):
+            return self.truediv_with_correlation(other)
+        # Assume `other` is a pure number
+        return Measurement(self._center / other, self._uncert / other)
+
+    def __rtruediv__(self, other):
+        # if isinstance(other, Measurement):
+        #     unreachable: Python should call other's __mul__
+        # Assume `other` is a pure number
+        new_center = other / self._center
+        reluncert = self._uncert / self._center
+        return Measurement(new_center, reluncert * new_center)
+
+    def __floordiv__(self, other):
+        # Does not really make much sense to produce an uncertainty for this
+        return self._center // other
+
+    def __rfloordiv__(self, other):
+        # Does not really make much sense to produce an uncertainty for this
+        return other // self._center
+
+    # I'll leave it for Python to implement the default in-place methods
 
     def tscore(self, other, r=0.0):
         """Compute the t-score between two `Measurement`s.
@@ -295,7 +378,7 @@ class Measurement:
         method_name = f"__{operation}__"
         if isinstance(other, Measurement):
             warnings.warn("Comparison of measurements compares the center value only."
-                          " For statistical comparison, use Measurement.tscore")
+                          " For statistical comparison, use `Measurement.tscore`")
             return getattr(self._center, method_name)(other._center)
         return getattr(self._center, method_name)(other)
 
