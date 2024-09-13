@@ -4,7 +4,11 @@ import numpy as np
 
 
 class Uncertainty:
-    """An uncertainty with math ability that gives correct string printout.
+    """An uncertainty that gives correct string printout.
+
+    Supports addition with other uncertainties with a given correlation
+    coefficient and the full floating point precision is kept until we
+    convert this object to a string.
     
     Examples
     --------
@@ -17,6 +21,8 @@ class Uncertainty:
     >>> u = Uncertainty(9123)
     >>> str(u)
     '9000'
+    >>> Uncertainty(1.14923) + Uncertainty(0.84213)
+    Uncertainty(1.4)
     """
 
     def __init__(self, uncert):
@@ -55,7 +61,7 @@ class Uncertainty:
         if not isinstance(other, Uncertainty):
             raise TypeError("Can only add two instances of `Uncertainty`")
         m = self._v**2 + other._v**2 + 2 * self._v * other._v * r
-        return m ** 0.5
+        return Uncertainty(m ** 0.5)
 
     def __add__(self, other):
         # Assume independence
@@ -66,12 +72,18 @@ class Measurement:
     """Represents a quantity with uncertainty.
     
     Arithmetics on `Measurement` should propagate uncertainties correctly
-    assuming independence.
+    assuming independence. No rounding on intermediate results until the
+    final string conversion.
 
     Examples
     --------
     >>> Measurement(10.12, 1.999) + Measurement(20, 3.1)
     Measurement(30, 4)
+    >>> # Also useful for formatting a single value with uncertainty
+    >>> import numpy as np
+    >>> arr = np.array([1.623, 2.123, 2.623])
+    >>> str(Measurement(np.mean(arr), np.std(arr)))
+    '2.1 ± 0.4'
     """
     def __init__(self, center, uncert):
         self._center = center
@@ -92,7 +104,7 @@ class Measurement:
         return centerstr, uncertstr
 
     def __str__(self):
-        return " ± ".join(*self._shared_stringify())
+        return " ± ".join(self._shared_stringify())
 
     def __repr__(self):
         return "Measurement({0}, {1})".format(*self._shared_stringify())
