@@ -5,8 +5,6 @@ Written for the Physics 2CL course at UC San Diego."""
 import math
 import warnings
 
-import numpy as np
-
 class Uncertainty:
     """An uncertainty that gives correct string printout.
 
@@ -16,7 +14,13 @@ class Uncertainty:
 
     Examples
     --------
-    Calling `str` on an `Uncertainty` rounds it correctly:
+    `str` keeps only one significant digit:
+
+    >>> u = Uncertainty(9123)
+    >>> str(u)
+    '9000'
+
+    But if the leading digit is 1, `str` keeps two siginificant digits:
 
     >>> u = Uncertainty(1.1243)
     >>> str(u)
@@ -24,9 +28,14 @@ class Uncertainty:
     >>> u = Uncertainty(0.104)
     >>> str(u)
     '0.10'
-    >>> u = Uncertainty(9123)
+
+    Edge case behaviour:
+    >>> u = Uncertainty(0.198)
     >>> str(u)
-    '9000'
+    '0.2'
+    >>> u = Uncertainty(1.96)
+    >>> str(u)
+    '2'
 
     Adding `Uncertainty` is done in quadrature by default:
 
@@ -71,6 +80,13 @@ class Uncertainty:
         if msd == 1:
             # Keep the next (lower) power of ten
             npow -= 1
+            # Check for edge case:
+            # If the next two digits will round up, too bad. Erase them.
+            # XXX: is there a better way?
+            tryround = abs(round(self._v, -npow))
+            trymsd, trynmsd = divmod(int(tryround/10**npow), 10)
+            if trymsd == 2 and trynmsd == 0:
+                npow += 1
         return -npow
 
     def __str__(self):
