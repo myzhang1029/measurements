@@ -57,7 +57,8 @@ class Uncertainty:
     """
 
     def __init__(self, uncert):
-        self._v = uncert
+        # Fix negative inputs
+        self.u = abs(uncert)
 
     def get_significant_digit(self):
         """Get the negative index of MSD for rounding uncertainties.
@@ -71,9 +72,9 @@ class Uncertainty:
         n : int
             The index as described above, useful for passing into `round`.
         """
-        if self._v == 0:
-            return self._v, 0
-        absv = abs(self._v)
+        if self.u == 0:
+            return 0
+        absv = abs(self.u)
         # Rounding away this power of 10 (MSE exponent - 1)
         npow = int(math.floor(math.log10(absv)))
         # Find the most significant digit
@@ -84,15 +85,24 @@ class Uncertainty:
             # Check for edge case:
             # If the next two digits will round up, too bad. Erase them.
             # XXX: is there a better way?
-            tryround = abs(round(self._v, -npow))
+            tryround = abs(round(self.u, -npow))
             trymsd, trynmsd = divmod(int(tryround/10**npow), 10)
             if trymsd == 2 and trynmsd == 0:
                 npow += 1
         return -npow
 
+    def get_value(self):
+        """Get the underlying uncertainty value."""
+        return self.u
+
+    def get_rounded_value(self):
+        """Get the underlying uncertainty value after rounding."""
+        npow = self.get_significant_digit()
+        return round(self.u, npow)
+
     def __str__(self):
         npow = self.get_significant_digit()
-        uncert = round(self._v, npow)
+        uncert = round(self.u, npow)
         if npow >= 0:
             return f"{uncert:.{npow}f}"
         # npow negative => keep only int part
@@ -117,7 +127,7 @@ class Uncertainty:
         """
         if not isinstance(other, Uncertainty):
             raise TypeError("Can only add two instances of `Uncertainty`")
-        m = self._v**2 + other._v**2 + 2 * self._v * other._v * r
+        m = self.u**2 + other.u**2 + 2 * self.u * other.u * r
         return Uncertainty(m ** 0.5)
 
     def __add__(self, other):
@@ -130,49 +140,49 @@ class Uncertainty:
 
     def __iadd__(self, other):
         # Assume independence
-        self._v = self.add_uncert(other)._v
+        self.u = self.add_uncert(other).u
         return self
 
     def __mul__(self, other):
-        return Uncertainty(self._v * other)
+        return Uncertainty(self.u * other)
 
     def __rmul__(self, other):
-        return Uncertainty(other * self._v)
+        return Uncertainty(other * self.u)
 
     def __imul__(self, other):
-        self._v *= other
+        self.u *= other
         return self
 
     def __truediv__(self, other):
-        return Uncertainty(self._v / other)
+        return Uncertainty(self.u / other)
         # no r*div
 
     def __itruediv__(self, other):
-        self._v /= other
+        self.u /= other
         return self
 
     def __floordiv__(self, other):
         warnings.warn("Are you sure you want to floordiv an uncertainty?")
-        return Uncertainty(self._v // other)
+        return Uncertainty(self.u // other)
         # no r*div
 
     def __ifloordiv__(self, other):
         warnings.warn("Are you sure you want to floordiv an uncertainty?")
-        self._v //= other
+        self.u //= other
         return self
 
     def __int__(self):
-        return int(self._v)
+        return int(self.u)
 
     def __float__(self):
-        return float(self._v)
+        return float(self.u)
 
     def _comparison_method(self, other, operation):
         """Shared code for `__lt__`, `__le__`, etc."""
         method_name = f"__{operation}__"
         if isinstance(other, Uncertainty):
-            return getattr(self._v, method_name)(other._v)
-        return getattr(self._v, method_name)(other)
+            return getattr(self.u, method_name)(other.u)
+        return getattr(self.u, method_name)(other)
 
     def __lt__(self, other):
         return self._comparison_method(other, "lt")
@@ -227,17 +237,34 @@ class Measurement:
     """
 
     def __init__(self, center, uncert):
-        self._center = center
+        self.center = center
         if isinstance(uncert, Uncertainty):
             # No conversion needed
-            self._uncert = uncert
+            self.uncert = uncert
         else:
-            self._uncert = Uncertainty(uncert)
+            self.uncert = Uncertainty(uncert)
+
+    def get_center(self):
+        """Get the center value of self."""
+        return self.center
+
+    def get_uncert(self):
+        """Get the uncertainty of self."""
+        return self.uncert
+
+    def get_rounded_center(self):
+        """Get the rounded center value of self."""
+        npow = self.uncert.get_significant_digit()
+        return round(self.center, npow)
+
+    def get_rounded_uncert(self):
+        """Get the rounded uncertainty of self."""
 
     def _shared_stringify(self):
-        npow = self._uncert.get_significant_digit()
-        center = round(self._center, npow)
-        uncertstr = str(self._uncert)
+        # We do not use `get_rounded_x` here to save one round of computation
+        npow = self.uncert.get_significant_digit()
+        center = round(self.center, npow)
+        uncertstr = str(self.uncert)
         if npow >= 0:
             centerstr = f"{center:.{npow}f}"
         else:
@@ -259,38 +286,38 @@ class Measurement:
     def add_with_correlation(self, other, r=0.0):
         """Add two `Measurement`s with the given correlation coefficient."""
         self._check_other_is_us(other)
-        new_uncert = self._uncert.add_uncert(other._uncert, r=r)
-        return Measurement(self._center + other._center, new_uncert)
+        new_uncert = self.uncert.add_uncert(other.uncert, r=r)
+        return Measurement(self.center + other.center, new_uncert)
 
     def __add__(self, other):
         if isinstance(other, Measurement):
             return self.add_with_correlation(other)
         # Assume `other` is a pure number
-        return Measurement(self._center + other, self._uncert)
+        return Measurement(self.center + other, self.uncert)
 
     def __radd__(self, other):
         # if isinstance(other, Measurement):
         #     unreachable: Python should call other's __add__
         # Assume `other` is a pure number
-        return Measurement(other + self._center, self._uncert)
+        return Measurement(other + self.center, self.uncert)
 
     def sub_with_correlation(self, other, r=0.0):
         """Subtract two `Measurement`s with the given correlation coefficient."""
         self._check_other_is_us(other)
-        new_uncert = self._uncert.add_uncert(other._uncert, r=r)
-        return Measurement(self._center - other._center, new_uncert)
+        new_uncert = self.uncert.add_uncert(other.uncert, r=r)
+        return Measurement(self.center - other.center, new_uncert)
 
     def __sub__(self, other):
         if isinstance(other, Measurement):
             return self.sub_with_correlation(other)
         # Assume `other` is a pure number
-        return Measurement(self._center - other, self._uncert)
+        return Measurement(self.center - other, self.uncert)
 
     def __rsub__(self, other):
         # if isinstance(other, Measurement):
         #     unreachable: Python should call other's __sub__
         # Assume `other` is a pure number
-        return Measurement(other - self._center, self._uncert)
+        return Measurement(other - self.center, self.uncert)
 
     def mul_with_correlation(self, other, r=0.0):
         """Multiply two `Measurement`s with the given correlation coefficient."""
@@ -299,53 +326,56 @@ class Measurement:
         # u(f)**2 = (u(a)b)**2 + (u(b)a)**2+corrterm
         # (u(f)/f)**2 = (u(a)/a)**2 + (u(b)/b)**2+corrterm/(ab)**2
         new_reluncert = (
-            self._uncert/self._center).add_uncert(other._uncert/other._center, r=r)
-        new_center = self._center * other._center
+            self.uncert/self.center).add_uncert(other.uncert/other.center, r=r)
+        new_center = self.center * other.center
         return Measurement(new_center, new_reluncert * new_center)
 
     def __mul__(self, other):
         if isinstance(other, Measurement):
             return self.mul_with_correlation(other)
         # Assume `other` is a pure number
-        return Measurement(self._center * other, self._uncert * other)
+        return Measurement(self.center * other, self.uncert * other)
 
     def __rmul__(self, other):
         # if isinstance(other, Measurement):
         #     unreachable: Python should call other's __mul__
         # Assume `other` is a pure number
-        return Measurement(other * self._center, other * self._uncert)
+        return Measurement(other * self.center, other * self.uncert)
 
     def truediv_with_correlation(self, other, r=0.0):
         """Multiply two `Measurement`s with the given correlation coefficient."""
         self._check_other_is_us(other)
-        new_center = self._center / other._center
-        new_reluncert = (self._uncert/self._center).add_uncert(
-            other._uncert / other._center, r=r)
+        new_center = self.center / other.center
+        new_reluncert = (self.uncert/self.center).add_uncert(
+            other.uncert / other.center, r=r)
         return Measurement(new_center, new_reluncert * new_center)
 
     def __truediv__(self, other):
         if isinstance(other, Measurement):
             return self.truediv_with_correlation(other)
         # Assume `other` is a pure number
-        return Measurement(self._center / other, self._uncert / other)
+        return Measurement(self.center / other, self.uncert / other)
 
     def __rtruediv__(self, other):
         # if isinstance(other, Measurement):
         #     unreachable: Python should call other's __mul__
         # Assume `other` is a pure number
-        new_center = other / self._center
-        reluncert = self._uncert / self._center
+        new_center = other / self.center
+        reluncert = self.uncert / self.center
         return Measurement(new_center, reluncert * new_center)
 
     def __floordiv__(self, other):
         # Does not really make much sense to produce an uncertainty for this
-        return self._center // other
+        return self.center // other
 
     def __rfloordiv__(self, other):
         # Does not really make much sense to produce an uncertainty for this
-        return other // self._center
+        return other // self.center
 
     # I'll leave it for Python to implement the default in-place methods
+
+    def __abs__(self):
+        return Measurement(abs(self.center), self.uncert)
 
     def tscore(self, other, r=0.0):
         """Compute the t-score between two `Measurement`s.
@@ -371,7 +401,7 @@ class Measurement:
         else:
             # This might raise TypeError if `other` is not to be added
             diff = self - other
-        return abs(diff._center) / float(diff._uncert)
+        return abs(diff.center) / float(diff.uncert)
 
     def _comparison_method(self, other, operation):
         """Shared code for `__lt__`, `__le__`, etc."""
@@ -379,8 +409,8 @@ class Measurement:
         if isinstance(other, Measurement):
             warnings.warn("Comparison of measurements compares the center value only."
                           " For statistical comparison, use `Measurement.tscore`")
-            return getattr(self._center, method_name)(other._center)
-        return getattr(self._center, method_name)(other)
+            return getattr(self.center, method_name)(other.center)
+        return getattr(self.center, method_name)(other)
 
     def __lt__(self, other):
         return self._comparison_method(other, "lt")
