@@ -5,6 +5,55 @@ Written for the Physics 2CL course at UC San Diego."""
 import math
 import warnings
 
+import numpy as np
+
+
+@np.vectorize
+def _get_significant_digit_one(u):
+    # See `Uncertainty.get_significant_digit` for documentation
+    if u == 0:
+        return 0
+    absv = abs(u)
+    # Rounding away this power of 10 (MSE exponent - 1)
+    npow = int(math.floor(math.log10(absv)))
+    # Find the most significant digit
+    msd = int(absv/10**npow)
+    if msd == 1:
+        # Keep the next (lower) power of ten
+        npow -= 1
+        # Check for edge case:
+        # If the next two digits will round up, too bad. Erase them.
+        # XXX: is there a better way?
+        tryround = abs(round(u, -npow))
+        trymsd, trynmsd = divmod(int(tryround/10**npow), 10)
+        if trymsd == 2 and trynmsd == 0:
+            npow += 1
+    return -npow
+
+
+def _round_arr_or_scalar(num, digits):
+    """round(num, digits) or that threaded over np.ndarray
+
+    Examples
+    --------
+    >>> _round_arr_or_scalar(10.123, 1)
+    10.1
+    >>> _round_arr_or_scalar([0.12,0.234,3.0], 2)
+    array([0.12, 0.23, 3.  ])
+    >>> _round_arr_or_scalar([0.12,0.234,3.0], [0, 2, 1])
+    array([0.  , 0.23, 3.  ])
+    """
+    if (isinstance(num, np.ndarray) and len(num.shape) != ()) or isinstance(num, list):
+        if isinstance(digits, np.ndarray) or isinstance(digits, list):
+            if len(num) != len(digits):
+                raise ValueError(
+                    "The lengths of `num` and `digits` must match")
+            return np.array([round(u, n) for u, n in zip(num, digits)])
+        # Else just use np.round(arr, scalar)
+        return np.round(num, digits)
+    # Both are scalars
+    return round(num, digits)
+
 
 class Uncertainty:
     """An uncertainty that gives correct string printout.
@@ -12,6 +61,9 @@ class Uncertainty:
     Supports addition with other uncertainties with a given correlation
     coefficient and the full floating point precision is kept until we
     convert this object to a string.
+
+    If the content is an array, this type will internally represent the
+    data as a NumPy array.
 
     Examples
     --------
@@ -54,11 +106,29 @@ class Uncertainty:
     Uncertainty(30)
     >>> Uncertainty(36) / 7
     Uncertainty(5)
+
+    One can convert between array-type `Uncertainty` and a list of
+    `Uncertainty`:
+
+    >>> Uncertainty([1, 2, 15, 23]).as_simple_list()
+    [Uncertainty(1.0), Uncertainty(2), Uncertainty(15), Uncertainty(20)]
+    >>> Uncertainty.from_simple_list([Uncertainty(1), Uncertainty(2), Uncertainty(15), Uncertainty(23)])
+    Uncertainty([1.0, 2, 15, 20])
+
+    Array-type `Uncertainty` supports NumPy-like arithmetic directly:
+
+    >>> 3 * Uncertainty([10, 10]) + Uncertainty([10, 10])
+    Uncertainty([30, 30])
+
+    Arithmetic between scalar and array `Uncertainty` threads like NumPy operations:
+
+    >>> Uncertainty([10, 10]) + Uncertainty(5)
+    Uncertainty([11, 11])
     """
 
     def __init__(self, uncert):
         # Fix negative inputs
-        self.u = abs(uncert)
+        self.u = abs(np.asarray(uncert))
 
     def get_significant_digit(self):
         """Get the negative index of MSD for rounding uncertainties.
@@ -72,24 +142,7 @@ class Uncertainty:
         n : int
             The index as described above, useful for passing into `round`.
         """
-        if self.u == 0:
-            return 0
-        absv = abs(self.u)
-        # Rounding away this power of 10 (MSE exponent - 1)
-        npow = int(math.floor(math.log10(absv)))
-        # Find the most significant digit
-        msd = int(absv/10**npow)
-        if msd == 1:
-            # Keep the next (lower) power of ten
-            npow -= 1
-            # Check for edge case:
-            # If the next two digits will round up, too bad. Erase them.
-            # XXX: is there a better way?
-            tryround = abs(round(self.u, -npow))
-            trymsd, trynmsd = divmod(int(tryround/10**npow), 10)
-            if trymsd == 2 and trynmsd == 0:
-                npow += 1
-        return -npow
+        return _get_significant_digit_one(self.u)
 
     def get_value(self):
         """Get the underlying uncertainty value."""
@@ -98,15 +151,37 @@ class Uncertainty:
     def get_rounded_value(self):
         """Get the underlying uncertainty value after rounding."""
         npow = self.get_significant_digit()
-        return round(self.u, npow)
+        return _round_arr_or_scalar(self.u, npow)
+
+    def is_array_type(self):
+        """Check if this `Uncertainty` is an array or a scalar."""
+        return len(self.u.shape) != 0
+
+    def as_simple_list(self):
+        """Convert an array `Uncertainty` to a scalar `Uncertainty` list."""
+        if not self.is_array_type():
+            return self
+        return list(iter(self))
+
+    @classmethod
+    def from_simple_list(cls, items: "list[Uncertainty]"):
+        """Create an array `Uncertainty` from a scalar `Uncertainty` list."""
+        return cls([x.u if isinstance(x, Uncertainty) else x for x in items])
+
+    def __iter__(self):
+        return map(lambda x: Uncertainty(x), self.u)
 
     def __str__(self):
+        def str_one(u, npow):
+            uncert = round(u, npow)
+            if npow >= 0:
+                return f"{uncert:.{npow}f}"
+            # npow negative => keep only int part
+            return str(int(uncert))
         npow = self.get_significant_digit()
-        uncert = round(self.u, npow)
-        if npow >= 0:
-            return f"{uncert:.{npow}f}"
-        # npow negative => keep only int part
-        return str(int(uncert))
+        if self.is_array_type():
+            return "[" + ", ".join(str_one(u, n) for u, n in zip(self.u, npow)) + "]"
+        return str_one(self.u, npow)
 
     def __repr__(self):
         return f"Uncertainty({self})"
@@ -116,7 +191,9 @@ class Uncertainty:
 
         Parameters
         ----------
-        r : int or float, optional
+        other : int or float or ndarray
+            The other uncertainty to add.
+        r : int or float or ndarray, optional
             The correlation coefficient between the two measurements. The
             default is 0 (no correlation).
 
@@ -177,6 +254,9 @@ class Uncertainty:
     def __float__(self):
         return float(self.u)
 
+    def __len__(self):
+        return len(self.u)
+
     def _comparison_method(self, other, operation):
         """Shared code for `__lt__`, `__le__`, etc."""
         method_name = f"__{operation}__"
@@ -234,15 +314,36 @@ class Measurement:
     Measurement(0.51, 0.10)
     >>> 1 / Measurement(10, 1)
     Measurement(0.100, 0.010)
+
+    There is also array-type `Measurement`:
+    >>> mar = Measurement(np.arange(5), np.arange(0.1, 0.3, 0.04))
+    >>> str(mar)
+    '[0.00 ± 0.10, 1.00 ± 0.14, 2.00 ± 0.18, 3.0 ± 0.2, 4.0 ± 0.3]'
+
+    Array-type `Measurement` supports NumPy-like arithmetic directly:
+
+    >>> 3 * mar
+    [Measurement(0.0, 0.3), Measurement(3.0, 0.4), Measurement(6.0, 0.5), Measurement(9.0, 0.7), Measurement(12.0, 0.8)]
     """
 
     def __init__(self, center, uncert):
-        self.center = center
+        self.center = np.asarray(center)
         if isinstance(uncert, Uncertainty):
             # No conversion needed
             self.uncert = uncert
+        elif hasattr(uncert, "__len__"):
+            # Make array-type `Uncertainty`
+            self.uncert = Uncertainty.from_simple_list(uncert)
         else:
             self.uncert = Uncertainty(uncert)
+        if self.uncert.is_array_type() and len(self.center) != len(self.uncert):
+            raise ValueError("The lengths of `center` and `uncert` must match")
+        # array-type uncert implies array center,
+        # but array center does not imply array-type uncert
+
+    def is_array_type(self):
+        """Check if this `Uncertainty` is an array or a scalar."""
+        return len(self.center.shape) != 0
 
     def get_center(self):
         """Get the center value of self."""
@@ -255,16 +356,18 @@ class Measurement:
     def get_rounded_center(self):
         """Get the rounded center value of self."""
         npow = self.uncert.get_significant_digit()
-        return round(self.center, npow)
+        return _round_arr_or_scalar(self.center, npow)
 
     def get_rounded_uncert(self):
         """Get the rounded uncertainty of self."""
+        return self.uncert.get_rounded_value()
 
-    def _shared_stringify(self):
+    @staticmethod
+    def _shared_stringify(center, uncert):
         # We do not use `get_rounded_x` here to save one round of computation
-        npow = self.uncert.get_significant_digit()
-        center = round(self.center, npow)
-        uncertstr = str(self.uncert)
+        npow = uncert.get_significant_digit()
+        center = np.round(center, npow)
+        uncertstr = str(uncert)
         if npow >= 0:
             centerstr = f"{center:.{npow}f}"
         else:
@@ -272,11 +375,22 @@ class Measurement:
             centerstr = str(int(center))
         return centerstr, uncertstr
 
+    def _shared_stringify_high(self, individual_formatter):
+        if self.is_array_type():
+            if self.uncert.is_array_type():
+                return "[" + ", ".join(
+                    individual_formatter.format(*self._shared_stringify(c, u)) for c, u in zip(self.center, self.uncert)
+                ) + "]"
+            return "[" + ", ".join(
+                individual_formatter.format(*self._shared_stringify(c, self.uncert)) for c in self.center
+            ) + "]"
+        return individual_formatter.format(*self._shared_stringify(self.center, self.uncert))
+
     def __str__(self):
-        return " ± ".join(self._shared_stringify())
+        return self._shared_stringify_high("{0} ± {1}")
 
     def __repr__(self):
-        return "Measurement({0}, {1})".format(*self._shared_stringify())
+        return self._shared_stringify_high("Measurement({0}, {1})")
 
     @staticmethod
     def _check_other_is_us(other):
