@@ -1,3 +1,5 @@
+"""Represents a quantity with uncertainty."""
+
 import warnings
 
 import numpy as np
@@ -17,8 +19,14 @@ class Measurement:
     --------
     Uncertainties are propagated assuming independence:
 
-    >>> Measurement(10.12, 1.999) + Measurement(20, 3.1)
-    Measurement(30, 4)
+    >>> val = Measurement(10.12, 1.999) + Measurement(20, 3.1)
+    >>> str(val)
+    '30 ± 4'
+
+    The Python `__repr__` of `Measurement` retains the full precision while
+    still letting the user see the rounded values:
+    >>> val
+    Measurement(30, 4, full_center=30.119999999999997, full_uncert=4)
 
     Also useful for formatting a single value with uncertainty:
 
@@ -29,44 +37,56 @@ class Measurement:
 
     Basic arithmetic operations work (also assuming independence):
 
-    >>> Measurement(10.12, 1.999) * Measurement(20, 1.1)
-    Measurement(200, 40)
-    >>> 10 * Measurement(20, 1.1)
-    Measurement(200, 11)
-    >>> Measurement(10.12, 1.999) / Measurement(20, 1.1)
-    Measurement(0.51, 0.10)
-    >>> 1 / Measurement(10, 1)
-    Measurement(0.100, 0.010)
+    >>> str(Measurement(10.12, 1.999) * Measurement(20, 1.1))
+    '200 ± 40'
+    >>> str(10 * Measurement(20, 1.1))
+    '200 ± 11'
+    >>> str(Measurement(10.12, 1.999) / Measurement(20, 1.1))
+    '0.51 ± 0.10'
+    >>> str(1 / Measurement(10, 1))
+    '0.100 ± 0.010'
 
     There is also array-type `Measurement`:
     >>> mar = Measurement(np.arange(5), np.arange(0.1, 0.3, 0.04))
     >>> str(mar)
     '[0.00 ± 0.10, 1.00 ± 0.14, 2.00 ± 0.18, 3.0 ± 0.2, 4.0 ± 0.3]'
 
+    They work just like arrays:
+    >>> mar[2]
+    Measurement(2.00, 0.18, full_center=2, full_uncert=0.18)
+    >>> str(mar[4])
+    '4.0 ± 0.3'
+
     Array-type `Measurement` supports NumPy-like arithmetic directly:
 
     >>> 3 * mar
-    [Measurement(0.0, 0.3), Measurement(3.0, 0.4), Measurement(6.0, 0.5), Measurement(9.0, 0.7), Measurement(12.0, 0.8)]
+    Measurement([0.0, 3.0, 6.0, 9.0, 12.0], [0.3, 0.4, 0.5, 0.7, 0.8], full_center=[0, 3, 6, 9, 12], full_uncert=[0.30000000000000004, 0.42000000000000004, 0.54, 0.6600000000000001, 0.78])
+
+    Array-type `Measurement` can be converted to and from a list of `Measurement`:
+    >>> lm = mar.as_simple_list()
+    >>> lm
+    [Measurement(0.00, 0.10, full_center=0, full_uncert=0.10), Measurement(1.00, 0.14, full_center=1, full_uncert=0.14), Measurement(2.00, 0.18, full_center=2, full_uncert=0.18), Measurement(3.0, 0.2, full_center=3, full_uncert=0.2), Measurement(4.0, 0.3, full_center=4, full_uncert=0.3)]
+    >>> Measurement.from_simple_list(lm)
+    Measurement([0.00, 1.00, 2.00, 3.0, 4.0], [0.10, 0.14, 0.18, 0.2, 0.3], full_center=[0, 1, 2, 3, 4], full_uncert=[0.1, 0.14, 0.18000000000000002, 0.22000000000000003, 0.26])
     """
 
-    def __init__(self, center, uncert):
+    def __init__(self, center, uncert, full_center=None, full_uncert=None):
+        # These to allow useful `repr` while still upholding the contract
+        # of outputting a representation that can be used to recreate the object
+        if full_center is not None:
+            center = full_center
+        if full_uncert is not None:
+            uncert = full_uncert
         self.center = np.asarray(center)
         if isinstance(uncert, Uncertainty):
             # No conversion needed
             self.uncert = uncert
-        elif hasattr(uncert, "__len__"):
-            # Make array-type `Uncertainty`
-            self.uncert = Uncertainty.from_simple_list(uncert)
         else:
             self.uncert = Uncertainty(uncert)
         if self.uncert.is_array_type() and len(self.center) != len(self.uncert):
             raise ValueError("The lengths of `center` and `uncert` must match")
         # array-type uncert implies array center,
         # but array center does not imply array-type uncert
-
-    def is_array_type(self):
-        """Check if this `Uncertainty` is an array or a scalar."""
-        return len(self.center.shape) != 0
 
     def get_center(self):
         """Get the center value of self."""
@@ -85,6 +105,39 @@ class Measurement:
         """Get the rounded uncertainty of self."""
         return self.uncert.get_rounded_value()
 
+    def is_array_type(self):
+        """Check if this `Measurement` is an array or a scalar."""
+        return len(self.center.shape) != 0
+
+    def as_simple_list(self):
+        """Convert an array `Measurement` to a scalar `Measurement` list."""
+        if not self.is_array_type():
+            return self
+        return list(iter(self))
+
+    @classmethod
+    def from_simple_list(cls, items):
+        """Create an array `Measurement` from a scalar `Measurement` list."""
+        return cls([x.center for x in items], Uncertainty.from_simple_list([x.uncert for x in items]))
+
+    def __iter__(self):
+        return map(lambda x: Measurement(x[0], x[1]), zip(self.center, self.uncert))
+
+    def __getitem__(self, idx):
+        return Measurement(self.center[idx], self.uncert[idx])
+
+    def __setitem__(self, idx, value):
+        if isinstance(value, Measurement):
+            self.center[idx] = value.center
+            self.uncert[idx] = value.uncert
+        else:
+            self.center[idx] = value[0]
+            self.uncert[idx] = value[1]
+
+    def __delitem__(self, idx):
+        self.center = np.delete(self.center, idx)
+        self.uncert = np.delete(self.uncert, idx)
+
     @staticmethod
     def _shared_stringify(center, uncert):
         # We do not use `get_rounded_x` here to save one round of computation
@@ -98,7 +151,8 @@ class Measurement:
             centerstr = str(int(center))
         return centerstr, uncertstr
 
-    def _shared_stringify_high(self, individual_formatter):
+    def __str__(self):
+        individual_formatter = "{0} ± {1}"
         if self.is_array_type():
             if self.uncert.is_array_type():
                 return "[" + ", ".join(
@@ -109,11 +163,23 @@ class Measurement:
             ) + "]"
         return individual_formatter.format(*self._shared_stringify(self.center, self.uncert))
 
-    def __str__(self):
-        return self._shared_stringify_high("{0} ± {1}")
-
     def __repr__(self):
-        return self._shared_stringify_high("Measurement({0}, {1})")
+        if self.is_array_type():
+            if self.uncert.is_array_type():
+                data = [self._shared_stringify(c, u) for c, u in zip(self.center, self.uncert)]
+                full_center = list(self.center)
+                full_uncert = list(self.uncert.u)
+            else:
+                data = [self._shared_stringify(c, self.uncert) for c in self.center]
+                full_center = list(self.center)
+                full_uncert = self.uncert
+            centerstrs, uncertstrs = zip(*data)
+            centerstr = ", ".join(centerstrs)
+            uncertstr = ", ".join(uncertstrs)
+            return f"Measurement([{centerstr}], [{uncertstr}], full_center={full_center}, full_uncert={full_uncert})"
+        centerstr, uncertstr = self._shared_stringify(self.center, self.uncert)
+        return f"Measurement({centerstr}, {uncertstr}, full_center={self.center}, full_uncert={self.uncert})"
+
 
     @staticmethod
     def _check_other_is_us(other):
@@ -238,7 +304,7 @@ class Measurement:
         else:
             # This might raise TypeError if `other` is not to be added
             diff = self - other
-        return abs(diff.center) / float(diff.uncert)
+        return abs(diff.center) / diff.uncert.u
 
     def _comparison_method(self, other, operation):
         """Shared code for `__lt__`, `__le__`, etc."""

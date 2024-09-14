@@ -38,8 +38,8 @@ def _round_arr_or_scalar(num, digits):
     >>> _round_arr_or_scalar([0.12,0.234,3.0], [0, 2, 1])
     array([0.  , 0.23, 3.  ])
     """
-    if (isinstance(num, np.ndarray) and len(num.shape) != ()) or isinstance(num, list):
-        if isinstance(digits, np.ndarray) or isinstance(digits, list):
+    if (isinstance(num, np.ndarray) and num.shape != ()) or isinstance(num, list):
+        if isinstance(digits, (np.ndarray, list)):
             if len(num) != len(digits):
                 raise ValueError(
                     "The lengths of `num` and `digits` must match")
@@ -47,4 +47,4 @@ def _round_arr_or_scalar(num, digits):
         # Else just use np.round(arr, scalar)
         return np.round(num, digits)
     # Both are scalars
-    return round(num, digits)
+    return round(float(num), digits)

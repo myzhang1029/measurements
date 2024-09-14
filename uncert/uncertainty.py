@@ -1,3 +1,5 @@
+"""Uncertainty for measurements."""
+
 import warnings
 
 import numpy as np
@@ -43,40 +45,44 @@ class Uncertainty:
     Adding `Uncertainty` is done in quadrature by default:
 
     >>> Uncertainty(1.14923) + Uncertainty(0.84213)
-    Uncertainty(1.4)
+    Uncertainty(1.4, full=1.4247499885243025)
 
     Specify a custom correlation coefficient with `add_uncert`:
 
     >>> Uncertainty(1.14923).add_uncert(Uncertainty(0.84213), r=1)
-    Uncertainty(2)
+    Uncertainty(2, full=1.99136)
 
     `Uncertainty` can be multiplied or divided with/by a scalar:
 
     >>> 2 * Uncertainty(13)
-    Uncertainty(30)
+    Uncertainty(30, full=26)
     >>> Uncertainty(36) / 7
-    Uncertainty(5)
+    Uncertainty(5, full=5.142857142857143)
 
     One can convert between array-type `Uncertainty` and a list of
     `Uncertainty`:
 
     >>> Uncertainty([1, 2, 15, 23]).as_simple_list()
-    [Uncertainty(1.0), Uncertainty(2), Uncertainty(15), Uncertainty(20)]
+    [Uncertainty(1.0, full=1), Uncertainty(2, full=2), Uncertainty(15, full=15), Uncertainty(20, full=23)]
     >>> Uncertainty.from_simple_list([Uncertainty(1), Uncertainty(2), Uncertainty(15), Uncertainty(23)])
-    Uncertainty([1.0, 2, 15, 20])
+    Uncertainty([1.0, 2, 15, 20], full=[1, 2, 15, 23])
 
     Array-type `Uncertainty` supports NumPy-like arithmetic directly:
 
     >>> 3 * Uncertainty([10, 10]) + Uncertainty([10, 10])
-    Uncertainty([30, 30])
+    Uncertainty([30, 30], full=[31.622776601683793, 31.622776601683793])
 
     Arithmetic between scalar and array `Uncertainty` threads like NumPy operations:
 
     >>> Uncertainty([10, 10]) + Uncertainty(5)
-    Uncertainty([11, 11])
+    Uncertainty([11, 11], full=[11.180339887498949, 11.180339887498949])
     """
 
-    def __init__(self, uncert):
+    def __init__(self, uncert, full=None):
+        # These to allow useful `repr` while still upholding the contract
+        # of outputting a representation that can be used to recreate the object
+        if full is not None:
+            uncert = full
         # Fix negative inputs
         self.u = abs(np.asarray(uncert))
 
@@ -114,12 +120,21 @@ class Uncertainty:
         return list(iter(self))
 
     @classmethod
-    def from_simple_list(cls, items: "list[Uncertainty]"):
+    def from_simple_list(cls, items):
         """Create an array `Uncertainty` from a scalar `Uncertainty` list."""
-        return cls([x.u if isinstance(x, Uncertainty) else x for x in items])
+        return cls([x.u for x in items])
 
     def __iter__(self):
-        return map(lambda x: Uncertainty(x), self.u)
+        return map(Uncertainty, self.u)
+
+    def __getitem__(self, idx):
+        return Uncertainty(self.u[idx])
+
+    def __setitem__(self, idx, value):
+        self.u[idx] = value
+
+    def __delitem__(self, idx):
+        self.u = np.delete(self.u, idx)
 
     def __str__(self):
         def str_one(u, npow):
@@ -134,7 +149,10 @@ class Uncertainty:
         return str_one(self.u, npow)
 
     def __repr__(self):
-        return f"Uncertainty({self})"
+        if self.is_array_type():
+            # I don't like NumPy's default repr
+            return f"Uncertainty({self}, full={list(self.u)})"
+        return f"Uncertainty({self}, full={self.u})"
 
     def add_uncert(self, other, r=0.0):
         """Add two uncertainties assuming a given correlation coefficient.
