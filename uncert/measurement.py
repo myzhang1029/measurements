@@ -138,6 +138,48 @@ class Measurement:
         self.center = np.delete(self.center, idx)
         self.uncert = np.delete(self.uncert, idx)
 
+    def __len__(self):
+        return len(self.center)
+
+    def extend(self, other):
+        """Extend the array-type `Measurement` with another `Measurement`.
+
+        Examples
+        --------
+        >>> a = Measurement([1, 2], [0.1, 0.2])
+        >>> b = Measurement([3, 4], [0.3, 0.4])
+        >>> a.extend(b)
+        >>> a
+        Measurement([1.00, 2.0, 3.0, 4.0], [0.10, 0.2, 0.3, 0.4], full_center=[1, 2, 3, 4], full_uncert=[0.1, 0.2, 0.3, 0.4])
+        """
+        if not self.is_array_type():
+            raise ValueError("Cannot extend a scalar Measurement")
+        if not other.is_array_type():
+            raise ValueError("Cannot extend with a scalar Measurement (use `append` instead)")
+        self.center = np.concatenate((self.center, other.center))
+        if self.uncert.is_array_type():
+            self.uncert.extend(other.uncert)
+        else:
+            self.uncert.append(other.uncert)
+
+    def append(self, other):
+        """Append a scalar `Measurement` to this array-type `Measurement`.
+
+        Examples
+        --------
+        >>> a = Measurement([1, 2], [0.1, 0.2])
+        >>> b = Measurement(3, 0.3)
+        >>> a.append(b)
+        >>> a
+        Measurement([1.00, 2.0, 3.0], [0.10, 0.2, 0.3], full_center=[1, 2, 3], full_uncert=[0.1, 0.2, 0.3])
+        """
+        if not self.is_array_type():
+            raise ValueError("Cannot append to a scalar Measurement")
+        if other.is_array_type():
+            raise ValueError("Cannot append an array Measurement (use `extend` instead)")
+        self.center = np.append(self.center, other.center)
+        self.uncert.append(other.uncert)
+
     @staticmethod
     def _shared_stringify(center, uncert):
         # We do not use `get_rounded_x` here to save one round of computation

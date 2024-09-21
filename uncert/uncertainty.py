@@ -136,6 +136,51 @@ class Uncertainty:
     def __delitem__(self, idx):
         self.u = np.delete(self.u, idx)
 
+    def __len__(self):
+        return len(self.u)
+
+    def extend(self, other):
+        """Extend this `Uncertainty` with another `Uncertainty` or list.
+
+        Examples
+        --------
+        >>> u = Uncertainty([1, 2, 3])
+        >>> u.extend(Uncertainty([4, 5]))
+        >>> u
+        Uncertainty([1.0, 2, 3, 4, 5], full=[1, 2, 3, 4, 5])
+        >>> u.extend([5])
+        >>> u
+        Uncertainty([1.0, 2, 3, 4, 5, 5], full=[1, 2, 3, 4, 5, 5])
+        """
+        if not self.is_array_type():
+            raise ValueError("Cannot extend a scalar Uncertainty")
+        if not isinstance(other, Uncertainty):
+            other = Uncertainty(other)
+        if not other.is_array_type():
+            raise ValueError("Cannot extend with a scalar Uncertainty (use `append` instead)")
+        self.u = np.concatenate((self.u, other.u))
+
+    def append(self, other):
+        """Append a scalar `Uncertainty` to this array-type `Uncertainty`.
+
+        Examples
+        --------
+        >>> u = Uncertainty([1, 2, 3])
+        >>> u.append(4)
+        >>> u
+        Uncertainty([1.0, 2, 3, 4], full=[1, 2, 3, 4])
+        >>> u.append(Uncertainty(5))
+        >>> u
+        Uncertainty([1.0, 2, 3, 4, 5], full=[1, 2, 3, 4, 5])
+        """
+        if not self.is_array_type():
+            raise ValueError("Cannot append to a scalar Uncertainty")
+        if not isinstance(other, Uncertainty):
+            other = Uncertainty(other)
+        if other.is_array_type():
+            raise ValueError("Cannot append an array Uncertainty (use `extend` instead)")
+        self.u = np.append(self.u, other.u)
+
     def __str__(self):
         def str_one(u, npow):
             uncert = round(u, npow)
@@ -221,9 +266,6 @@ class Uncertainty:
 
     def __float__(self):
         return float(self.u)
-
-    def __len__(self):
-        return len(self.u)
 
     def _comparison_method(self, other, operation):
         """Shared code for `__lt__`, `__le__`, etc."""
